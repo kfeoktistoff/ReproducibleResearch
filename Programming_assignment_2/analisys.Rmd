@@ -1,0 +1,118 @@
+---
+title: "StormAnalisys"
+author: "Kirill Feoktistov"
+date: "21.02.2015"
+output: html_document
+---
+
+# The most harmful storm consequences in US
+
+The reports explores U.S. National Oceanic and Atmospheric Administration's (NOAA) dataset. This dataset contains gathered statistical data on weather events for period 1950-2011 years. It also includes information on healthy and economycal damage.
+
+The report target is to represent the top 10 most dangerous weather events from health and economic points of view. Also aggregated impact data by event type is available. Health damage is calculated as sum of fatal and injure incidents. Economy damage is calculated as sum of crop and property damages.
+
+## Processing data
+
+Loading the dataset.
+Link availability was checked on Feb 21 13:20 UTC
+
+```{r init, cache=TRUE}
+require("gdata")
+require("lattice")
+
+fileUrl <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+fileName <- "repdata_data_StormData.csv.bz2"
+victimFields <- list(field = "healthHarm", readable = "Fatal and injured", plotTitle = "Health consequences")
+economyFields <- list(field = "economyHarm", readable = "Economy harm, millions dollars", plotTitle = "Economic consequences")
+```
+
+```{r gettingData, cache = TRUE}
+if(!file.exists(fileName)){
+  download.file(fileUrl,fileName, mode = "wb", method="curl")
+}
+```
+
+Dataset contains raw data. This section removes splitted spaces, small typos and also casts analised strings to equal case.
+Also to calculate economyc consequences the multiplier should be used. The multiplier is stored in PROPDMGEXP and CROPDMGEXP columns as character or numeric values. Numeric values means power of 10 (e.g. multiplier 3 means 10^3). Character values: **H**undred, **K**ilo, **M**illion, **B**illion. Other values are assumed as 1.
+
+```{r cleaningData, cache=TRUE}
+multiply <- function(val) {
+  if (is.numeric(val)) {
+    10^val
+  } else {
+    switch(tolower(val), h=1e2, k = 1e3, m = 1e6, b=1e9, 1)
+  }
+}
+
+dataset <- read.csv(fileName)
+dataset$EVTYPE <- trim(tolower(dataset$EVTYPE))
+dataset$EVTYPE <- gsub("/", "", dataset$EVTYPE)
+dataset$EVTYPE <- gsub("\\s\\s+", "\\s", dataset$EVTYPE)
+dataset$PROPDMGEXP <- sapply(dataset$PROPDMGEXP, multiply)
+dataset$CROPDMGEXP <- sapply(dataset$CROPDMGEXP, multiply)
+
+dataset$economyHarm <- (dataset$PROPDMG*dataset$PROPDMGEXP + dataset$CROPDMG*dataset$CROPDMGEXP)/1e6
+dataset$healthHarm <- dataset$FATALITIES + dataset$INJURIES
+dataset$Year <- format(as.POSIXct(dataset$BGN_DATE, format="%m/%d/%Y %H:%M:%S"), "%Y")
+dataset$Location <- paste(trim(toupper(dataset$COUNTYNAME)), trim(toupper(dataset$STATE)), sep=", ")
+```
+
+# Results
+
+## Event reports
+
+This section represents the most influent events made impact on health and economy.
+
+### Health influence by event
+
+Top-10 most dangerous weather events
+
+```{r healthByEvent, cache=TRUE}
+top <- function(dataset, n, field, fieldReadableName) {
+  result <- head(dataset[order(-dataset[[field]], dataset$COUNTYNAME), c("EVTYPE", "Year", field)], n)
+  result <- as.data.frame(result, row.names = 1:n)
+  colnames(result) <- c("Type", "Year", fieldReadableName)
+  result
+}
+
+top(dataset, 10, victimFields$field, victimFields$readable)
+```
+
+### Economy harm by event
+
+Top-10 most desctructive events
+
+```{r economyByEvent, cache=TRUE}
+top(dataset, 10, economyFields$field, economyFields$readable)
+```
+
+## Event type reports
+
+This section represents most dangerous event types.
+
+### Victims by event type
+
+Top-10 dangerous event types
+```{r victimsByType, cache=TRUE}
+topAggregated <- function(dataset, parameters, n) {
+  result <- aggregate(dataset[[parameters$field]] ~ EVTYPE, dataset, sum)
+  colnames(result) <- c("Type", parameters$readable)
+  result <- head(result[order(-result[[parameters$readable]]), ], n)
+  result$Type <- factor(result$Type, levels=unique(result$Type))
+  barchart(result[[parameters$readable]]~Type, result, scales=list(x=list(rot=90)), xlab="Event type", ylab = parameters$readable, main=parameters$plotTitle)
+}
+
+topAggregated(dataset, victimFields, 10)
+```
+
+### Economy harm by event type
+
+Top-10 destructive event types
+
+```{r economyByType, cache=TRUE}
+topAggregated(dataset, economyFields, 10)
+```
+
+## Conclusion
+
+As shown from the report, the most dangerous weather event is tornado and the flood consequences are the most expensive.
